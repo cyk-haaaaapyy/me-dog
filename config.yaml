@@ -21,8 +21,17 @@ physics:
   turn_speed: 120.0     # 转向速度（度/秒）
   gravity: -98         # 重力加速度（单位/秒²）
   ground_height: -1     # 地面高度（游戏单位）
-  jump_speed: 30.5     # 跳跃初速度（单位/秒）
+  jump_speed: 30.5     # 普通跳跃初速度（单位/秒）
   jump_cooldown: 2.0000   # 跳跃冷却时间（秒）
+  double_jump:
+    enabled: true        # 是否启用二段跳
+    speed: 25.0         # 二段跳跃速度
+    height: 8.0         # 二段跳跃高度（游戏单位）
+    health_cost: 20     # 二段跳消耗的血量
+    min_height: 1.0     # 触发二段跳所需的最小离地高度
+    fall_speed_scale: 0.5  # 二段跳后的下落速度缩放（0.5表示下落速度减半）
+    landing_invincible_time: 1.0  # 二段跳落地后的无敌时间（秒）
+    landing_cooldown: 5.0        # 二段跳落地后的跳跃冷却时间（秒）
 
 # 相机控制 - 定义相机的行为和视角参数
 camera:
@@ -64,7 +73,7 @@ collision:
 
 # 立方体运动设置
 cube_movement:
-  base_speed: 5.0         # 增加移动速度
+  base_speed: 4.5         # 增加移动速度
   patrol_radius: 8.0      # 增加巡逻范围
   direction_change:
     min_interval: 2.0     # 增加方向改变间隔
@@ -88,6 +97,10 @@ reference_cubes:
 player_status:
   max_health: 100       # 最大生命值
   initial_health: 100   # 初始生命值
+  health_regen:
+    amount: 1           # 每次恢复的血量
+    interval: 0.7       # 恢复间隔（秒）
+    still_time: 3       # 需要保持静止的时间（秒）
   health_bar:
     position: [-0.25, 0.9]  # 血条位置 [x, y]
     width: 0.5            # 血条宽度
@@ -100,8 +113,8 @@ player_status:
 # 游戏规则设置
 game_rules:
   boundaries:
-    x: [-45, 45]    # X轴边界范围 [最小值, 最大值]
-    y: [-45, 45]    # Y轴边界范围 [最小值, 最大值]
+    x: [-50, 50]    # X轴边界范围 [最小值, 最大值]
+    y: [-50, 50]    # Y轴边界范围 [最小值, 最大值]
     violation:
       count_time: 10.0  # 计数时间窗口（秒）
       max_violations: 2  # 最大违规次数
@@ -111,7 +124,7 @@ game_rules:
     out_of_bounds: 100    # 离开边界的伤害值
     warning_time: 5.0     # 警告时间（秒）
     invincible_time: 5.0  # 出生后的无敌时间（秒）
-    damage_cooldown: 3.0  # 受伤后的无敌时间（秒）
+    damage_cooldown: 0.5  # 受伤后的无敌时间（秒）
   warning:
     text_scale: 0.2      # 警告文本大小
     text_color: [1, 0, 0, 1]  # 警告文本颜色 [R, G, B, A]

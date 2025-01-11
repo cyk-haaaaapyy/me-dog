@@ -4,6 +4,7 @@ from panda3d.core import (
     Point3, WindowProperties, 
     GeomVertexFormat, GeomVertexData,
     Geom, GeomTriangles, GeomVertexWriter, GeomNode, GeomLines,
+    GeomTristrips,
     TextNode, AmbientLight, DirectionalLight,
     NodePath, CollisionNode, CollisionBox, CollisionCapsule, BitMask32,
     CollisionTraverser, CollisionHandlerQueue
@@ -152,6 +153,38 @@ class SandboxGame(ShowBase):
         self.boundary_violations = []  # 存储违规时间的列表
         self.last_boundary_return_time = 0  # 上次从边界返回的时间
         self.boundary_return_text = self.add_boundary_return_display()
+        
+        # 添加回血相关属性
+        self.last_move_time = 0     # 上次移动时间
+        self.last_regen_time = 0    # 上次回血时间
+        
+        # 修改二段跳相关属性
+        self.can_double_jump = False    # 初始不能二段跳，需要第一次跳跃后才能
+        self.is_first_jump = False     # 是否在第一次跳跃的过程中
+        
+        # 修改地面高度的计算，考虑角色高度
+        self.ground_height = self.cfg.physics.ground_height
+        self.character_height = self.player_height / 2  # 角色中心点到脚底的距离
+        
+        # 添加二段跳状态显示
+        self.double_jump_text = self.add_double_jump_display()
+        
+        # 添加跳跃键释放检查
+        self.jump_key_released = True  # 跳跃键是否已释放
+        self.can_double_jump = False
+        self.is_first_jump = False
+        
+        # 添加下落速度控制
+        self.normal_gravity = self.cfg.physics.gravity  # 保存原始重力值
+        self.current_gravity = self.normal_gravity      # 当前使用的重力值
+        self.is_double_jumping = False                  # 是否在二段跳状态
+        
+        # 添加二段跳落地相关属性
+        self.landing_invincible_start = 0  # 落地无敌开始时间
+        self.is_landing_invincible = False  # 是否处于落地无敌状态
+        
+        # 添加无敌状态光环
+        self.create_invincible_halo()
         
     def create_terrain(self):
         # 创建地面
@@ -389,7 +422,7 @@ class SandboxGame(ShowBase):
         self.accept("d", self.update_key, ["turn_right", True])
         self.accept("d-up", self.update_key, ["turn_right", False])
         self.accept("space", self.update_key, ["up", True])
-        self.accept("space-up", self.update_key, ["up", False])
+        self.accept("space-up", self.handle_jump_key_release)  # 添加释放事件处理
         self.accept("lshift", self.update_key, ["down", True])
         self.accept("lshift-up", self.update_key, ["down", False])
         
@@ -433,6 +466,26 @@ class SandboxGame(ShowBase):
     def move_task(self, task):
         if not self.game_running:
             return Task.cont
+        
+        current_time = globalClock.getRealTime()
+        dt = globalClock.getDt()
+        
+        # 检查是否有移动输入
+        has_movement = (self.keyMap["forward"] or self.keyMap["backward"] or 
+                       self.keyMap["turn_left"] or self.keyMap["turn_right"] or
+                       abs(self.velocity.length()) > 0.1)  # 检查是否还在移动
+        
+        if has_movement:
+            self.last_move_time = current_time
+        else:
+            # 检查是否可以回血
+            still_duration = current_time - self.last_move_time
+            if (still_duration >= self.cfg.player_status.health_regen.still_time and 
+                current_time - self.last_regen_time >= self.cfg.player_status.health_regen.interval):
+                # 回血
+                if self.health < self.max_health:
+                    self.update_health(self.cfg.player_status.health_regen.amount)
+                    self.last_regen_time = current_time
         
         dt = globalClock.getDt()
         current_time = task.time
@@ -480,29 +533,122 @@ class SandboxGame(ShowBase):
             self.velocity.setX(self.velocity.getX() * self.deceleration)
             self.velocity.setY(self.velocity.getY() * self.deceleration)
         
-        # 处理跳跃冷却
+        # 计算离地高度
+        height_from_ground = self.position.getZ() - (self.ground_height + self.character_height)
+        
+        # 更新二段跳状态显示
+        if (self.is_first_jump and self.can_double_jump and 
+            height_from_ground >= self.cfg.physics.double_jump.min_height):
+            self.double_jump_text.setText(f'Double Jump Ready! (Cost: {self.cfg.physics.double_jump.health_cost} HP)')
+            self.double_jump_text.setFg((0, 1, 0, 1))  # 绿色表示可用
+        else:
+            if self.is_first_jump and not self.can_double_jump:
+                self.double_jump_text.setText('Double Jump Used!')
+                self.double_jump_text.setFg((1, 0, 0, 1))  # 红色表示已使用
+            else:
+                self.double_jump_text.setText('Double Jump Not Ready')
+                self.double_jump_text.setFg((0.7, 0.7, 0.7, 1))  # 灰色表示不可用
+        
+        # 处理落地无敌状态和显示
+        if self.is_landing_invincible:
+            remaining = self.cfg.physics.double_jump.landing_invincible_time - (current_time - self.landing_invincible_start)
+            if remaining > 0:
+                # 显示落地无敌状态
+                self.invincible_text.setText(f'Landing Invincible: {remaining:.1f}s')
+                self.invincible_text.setFg((0, 1, 0, 1))  # 绿色
+            else:
+                self.is_landing_invincible = False
+                self.invincible_text.setText('')
+        
+        # 修改跳跃冷却检查和显示
         if not self.can_jump:
-            time_since_jump = current_time - self.last_jump_time
-            if time_since_jump >= self.cfg.physics.jump_cooldown:
+            # 根据是否是二段跳落地选择不同的冷却时间
+            cooldown_time = (self.cfg.physics.double_jump.landing_cooldown 
+                            if self.is_double_jumping or 
+                            (current_time - self.landing_invincible_start < self.cfg.physics.double_jump.landing_invincible_time)
+                            else self.cfg.physics.jump_cooldown)
+            
+            remaining = cooldown_time - (current_time - self.last_jump_time)
+            if remaining <= 0:
                 self.can_jump = True
+                self.jump_cooldown_text.setText('Jump Ready')
+                self.jump_cooldown_text.setFg((1, 1, 1, 1))
+            else:
+                self.jump_cooldown_text.setText(f'Jump Cooldown: {remaining:.1f}s')
+                # 使用不同颜色区分普通冷却和二段跳冷却
+                self.jump_cooldown_text.setFg((1, 0, 0, 1) if cooldown_time > self.cfg.physics.jump_cooldown 
+                                            else (1, 0.5, 0, 1))
         
         # 处理跳跃
-        if self.keyMap["up"] and self.position.getZ() <= self.ground_height + self.player_height:
-            if self.can_jump:
-                self.velocity.setZ(self.jump_speed)
-                self.can_jump = False
-                self.last_jump_time = current_time
+        if self.keyMap["up"]:
+            current_time = globalClock.getRealTime()
+            
+            # 如果在无敌状态下，不允许跳跃
+            if not self.is_invincible and not self.is_landing_invincible:
+                # 在地面上时可以进行普通跳跃
+                if self.position.getZ() <= self.ground_height + self.character_height + 0.1:
+                    if self.can_jump:  # 检查是否可以跳跃
+                        self.velocity.setZ(self.jump_speed)
+                        self.last_jump_time = current_time
+                        self.can_jump = False  # 进入冷却
+                        self.is_first_jump = True
+                        self.can_double_jump = True
+                        self.jump_key_released = False
+                
+                # 在空中且达到最小高度时才能二段跳
+                elif (self.is_first_jump and self.can_double_jump and 
+                      height_from_ground >= self.cfg.physics.double_jump.min_height and
+                      self.jump_key_released):
+                    # 检查血量是否足够
+                    if self.health > self.cfg.physics.double_jump.health_cost:
+                        # 计算达到指定高度所需的初速度
+                        # 使用运动学公式：v = sqrt(2gh)，其中g是重力加速度，h是目标高度
+                        target_height = self.cfg.physics.double_jump.height
+                        jump_speed = math.sqrt(2 * abs(self.gravity) * target_height)
+                        
+                        self.velocity.setZ(jump_speed)  # 使用计算出的速度
+                        self.can_double_jump = False
+                        self.jump_key_released = False
+                        # 扣除血量
+                        self.update_health(-self.cfg.physics.double_jump.health_cost)
+                        # 显示二段跳已使用状态
+                        self.double_jump_text.setText('Double Jump Used!')
+                        self.double_jump_text.setFg((1, 0, 0, 1))
+                        
+                        self.is_double_jumping = True  # 标记进入二段跳状态
+                        # 调整重力
+                        self.current_gravity = self.normal_gravity * self.cfg.physics.double_jump.fall_speed_scale
         
-        # 应用重力
-        self.velocity.setZ(self.velocity.getZ() + self.gravity * dt)
+        # 应用当前重力（而不是直接使用 self.gravity）
+        self.velocity.setZ(self.velocity.getZ() + self.current_gravity * dt)
         
         # 更新位置
         self.position += self.velocity * dt
         
-        # 检查地面碰撞
-        if self.position.getZ() < self.ground_height + self.player_height:
-            self.position.setZ(self.ground_height + self.player_height)
+        # 落地检测
+        if self.position.getZ() <= self.ground_height + self.character_height:
+            self.position.setZ(self.ground_height + self.character_height)
             self.velocity.setZ(0)
+            self.is_first_jump = False
+            self.can_double_jump = False
+            
+            # 如果是从二段跳落地
+            if self.is_double_jumping:
+                current_time = globalClock.getRealTime()
+                # 设置落地无敌
+                self.is_landing_invincible = True
+                self.landing_invincible_start = current_time
+                # 设置更长的跳跃冷却
+                self.last_jump_time = current_time
+                self.can_jump = False
+                # 重置重力
+                self.current_gravity = self.normal_gravity
+                self.is_double_jumping = False
+        
+        # 处理落地无敌状态
+        if self.is_landing_invincible:
+            if current_time - self.landing_invincible_start >= self.cfg.physics.double_jump.landing_invincible_time:
+                self.is_landing_invincible = False
         
         # 更新角色位置
         self.player.setPos(self.position)
@@ -546,16 +692,6 @@ class SandboxGame(ShowBase):
             f'{round(cam_hpr.getZ(), 2)})'
         )
         
-        # 更新跳跃冷却显示
-        if self.can_jump:
-            self.jump_cooldown_text.setText('Jump Ready')
-            self.jump_cooldown_text.setFg((1, 1, 1, 1))  # 白色，作为元组传递
-        else:
-            remaining = self.cfg.physics.jump_cooldown - (current_time - self.last_jump_time)
-            remaining = max(0, round(remaining, 1))
-            self.jump_cooldown_text.setText(f'Jump Cooldown: {remaining}s')
-            self.jump_cooldown_text.setFg((1, 0.5, 0, 1))  # 橙色，作为元组传递
-        
         # 更新得分显示（存活时间）
         if self.game_running:
             survival_time = int(globalClock.getRealTime() - self.start_time)
@@ -585,6 +721,9 @@ class SandboxGame(ShowBase):
         
         # 检查是否超出边界
         self.check_boundaries()
+        
+        # 更新无敌状态效果
+        self.update_invincible_state()
         
         return Task.cont
 
@@ -788,8 +927,8 @@ class SandboxGame(ShowBase):
     def handle_cube_collision(self, entry):
         if self.game_running:
             current_time = globalClock.getRealTime()
-            # 检查是否在无敌时间内
-            if not self.is_invincible:
+            # 检查是否在无敌时间内（包括落地无敌）
+            if not self.is_invincible and not self.is_landing_invincible:
                 # 检查是否在伤害冷却时间内
                 if current_time - self.last_damage_time >= self.damage_cooldown:
                     self.update_health(-self.cfg.game_rules.damage.cube_collision)
@@ -810,23 +949,25 @@ class SandboxGame(ShowBase):
         # 计算最终得分（存活时间）
         self.survival_time = int(globalClock.getRealTime() - self.start_time)
         
-        # 创建游戏结束文本，使用正确的文本对齐方式
+        # 如果已经存在游戏结束文本，先移除它
+        if hasattr(self, 'game_over_text') and self.game_over_text:
+            self.game_over_text.destroy()
+        
+        # 创建新的游戏结束文本
         self.game_over_text = OnscreenText(
             text=f'Game Over!\nSurvival Time: {self.survival_time} seconds\n\nPress R to restart',
             pos=tuple(self.cfg.game_rules.game_over.text_position),
             scale=self.cfg.game_rules.game_over.text_scale,
             fg=(1, 0, 0, 1),
-            align=TextNode.ACenter,  # 使用 ACenter 而不是 CMCenter
+            align=TextNode.ACenter,
             mayChange=True
         )
-        
-        # 添加重启游戏的按键监听
-        self.accept('r', self.restart_game)
 
     def restart_game(self):
         # 移除游戏结束文本
-        if hasattr(self, 'game_over_text'):
+        if hasattr(self, 'game_over_text') and self.game_over_text:
             self.game_over_text.destroy()
+            delattr(self, 'game_over_text')  # 完全移除属性
         
         # 重置玩家状态
         self.health = self.cfg.player_status.initial_health
@@ -850,8 +991,8 @@ class SandboxGame(ShowBase):
         self.last_boundary_return_time = 0
         self.warning_active = False
         self.warning_start_time = 0
-        if self.warning_text:
-            self.warning_text.destroy()
+        if hasattr(self, 'warning_text') and self.warning_text:
+            self.warning_text.destroy()  # 同样使用 destroy
             self.warning_text = None
         
         # 重置边界返回文本
@@ -860,6 +1001,28 @@ class SandboxGame(ShowBase):
         
         # 移除任何正在运行的警告任务
         taskMgr.remove("BlinkWarning")
+        
+        # 重置二段跳状态显示
+        self.double_jump_text.setText('Double Jump Not Ready')
+        self.double_jump_text.setFg((0.7, 0.7, 0.7, 1))
+        
+        # 重置跳跃相关状态
+        self.jump_key_released = True
+        self.can_double_jump = False
+        self.is_first_jump = False
+        
+        # 重置重力相关状态
+        self.current_gravity = self.normal_gravity
+        self.is_double_jumping = False
+        
+        # 重置落地无敌状态
+        self.is_landing_invincible = False
+        self.landing_invincible_start = 0
+        
+        # 重置光环效果
+        self.invincible_halo.setH(0)
+        self.invincible_halo.setScale(1)
+        self.invincible_halo.setColorScale(1, 0.8, 0, 0.5)
 
     def update_cubes_task(self, task):
         if not self.game_running:
@@ -1153,6 +1316,94 @@ class SandboxGame(ShowBase):
             mayChange=True
         )
         return return_text
+
+    def add_double_jump_display(self):
+        # 创建二段跳状态显示文本
+        double_jump_text = OnscreenText(
+            text='',
+            pos=(-1.3, 0.4),     # 位置在左侧信息区
+            scale=0.05,
+            fg=(1, 1, 1, 1),
+            align=TextNode.ALeft,
+            mayChange=True
+        )
+        return double_jump_text
+
+    def handle_jump_key_release(self):
+        self.keyMap["up"] = False
+        self.jump_key_released = True  # 标记跳跃键已释放
+
+    def create_invincible_halo(self):
+        # 创建光环的顶点数据
+        format = GeomVertexFormat.getV3c4()
+        vdata = GeomVertexData('halo', format, Geom.UHStatic)
+        
+        vertex = GeomVertexWriter(vdata, 'vertex')
+        color = GeomVertexWriter(vdata, 'color')
+        
+        # 创建一个圆形光环
+        segments = 32  # 圆的分段数
+        radius = 2.0   # 光环半径
+        thickness = 0.2  # 光环厚度
+        
+        # 创建内圈和外圈的顶点
+        for i in range(segments + 1):
+            angle = 2.0 * math.pi * i / segments
+            x = math.cos(angle)
+            y = math.sin(angle)
+            
+            # 内圈顶点
+            vertex.addData3(x * (radius - thickness), y * (radius - thickness), 0.1)
+            # 外圈顶点
+            vertex.addData3(x * radius, y * radius, 0.1)
+            
+            # 添加颜色（黄色半透明）
+            color.addData4(1, 1, 0, 0.5)  # 内圈颜色
+            color.addData4(1, 1, 0, 0)    # 外圈颜色（渐变到透明）
+        
+        # 创建三角形带
+        tris = GeomTristrips(Geom.UHStatic)
+        for i in range(segments * 2 + 2):
+            tris.addVertex(i)
+        
+        geom = Geom(vdata)
+        geom.addPrimitive(tris)
+        
+        node = GeomNode('invincible_halo')
+        node.addGeom(geom)
+        
+        # 创建光环节点
+        self.invincible_halo = self.player.attachNewNode(node)
+        self.invincible_halo.setTwoSided(True)  # 双面显示
+        self.invincible_halo.setTransparency(True)  # 启用透明度
+        self.invincible_halo.setP(90)  # 使光环水平
+        self.invincible_halo.hide()  # 初始时隐藏
+
+    def update_invincible_state(self):
+        current_time = globalClock.getRealTime()
+        
+        if self.is_invincible or self.is_landing_invincible:
+            # 显示光环并更新效果
+            self.invincible_halo.show()
+            
+            # 旋转光环
+            rotation_speed = 90  # 每秒旋转90度
+            self.invincible_halo.setH((current_time * rotation_speed) % 360)
+            
+            # 缩放呼吸效果
+            scale = 1.0 + 0.1 * math.sin(current_time * 5)
+            self.invincible_halo.setScale(scale)
+            
+            # 更新颜色
+            if self.is_invincible:
+                # 出生无敌时为金色
+                self.invincible_halo.setColorScale(1, 0.8, 0, 0.5 + 0.2 * math.sin(current_time * 5))
+            else:
+                # 落地无敌时为蓝色
+                self.invincible_halo.setColorScale(0, 0.8, 1, 0.5 + 0.2 * math.sin(current_time * 5))
+        else:
+            # 隐藏光环
+            self.invincible_halo.hide()
 
 game = SandboxGame()
 game.run() 
