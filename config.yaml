@@ -37,7 +37,7 @@ physics:
 camera:
   distance: 20.0        # 相机与角色的水平距离（游戏单位）
   height: 8.0          # 相机相对角色的高度（游戏单位）
-  pitch: -20.0         # 相机俯视角度（度数，负值表示向下看）
+  pitch: 1.0         # 相机俯视角度（度数，负值表示向下看）
   smooth: 0.95         # 相机跟随平滑系数（0-1，越大越平滑）
   mouse_sensitivity: 5.0  # 鼠标灵敏度（视角旋转速度）
 
@@ -53,8 +53,8 @@ lighting:
 terrain:
   grid_size: 5          # 网格单元大小（游戏单位）
   size:
-    x: [-50, 50]        # X轴范围 [最小值, 最大值]
-    y: [-50, 50]        # Y轴范围 [最小值, 最大值]
+    x: [-70, 70]        # X轴范围 [最小值, 最大值]
+    y: [-70, 70]        # Y轴范围 [最小值, 最大值]
   color: [0.1, 0.5, 0.1, 1.0]  # 地面颜色 [R, G, B, A]
 
 # 方向指示器 - 角色前方的指示标记
@@ -74,18 +74,18 @@ collision:
 # 立方体运动设置
 cube_movement:
   base_speed: 4.5         # 增加移动速度
-  patrol_radius: 8.0      # 增加巡逻范围
+  patrol_radius: 80.0      # 增加巡逻范围
   direction_change:
     min_interval: 2.0     # 增加方向改变间隔
     max_interval: 4.0
   rotation_speed: [-2, 2] # 增加旋转速度
-  boundary: 45           # 活动范围边界 
+  boundary: 500           # 活动范围边界 
 
 # 参考立方体设置
 reference_cubes:
   layout:
-    x: [-50, 50]        # X轴范围 [最小值, 最大值]
-    y: [-50, 50]        # Y轴范围 [最小值, 最大值]
+    x: [-70, 70]        # X轴范围 [最小值, 最大值]
+    y: [-70, 70]        # Y轴范围 [最小值, 最大值]
     spacing: 10          # 立方体之间的间距
     safe_zone: 10        # 出生点安全区域范围（不生成立方体）
   appearance:
@@ -98,7 +98,7 @@ player_status:
   max_health: 100       # 最大生命值
   initial_health: 100   # 初始生命值
   health_regen:
-    amount: 1           # 每次恢复的血量
+    amount: 2.0          # 每次恢复的血量
     interval: 0.7       # 恢复间隔（秒）
     still_time: 3       # 需要保持静止的时间（秒）
   health_bar:
@@ -113,8 +113,8 @@ player_status:
 # 游戏规则设置
 game_rules:
   boundaries:
-    x: [-50, 50]    # X轴边界范围 [最小值, 最大值]
-    y: [-50, 50]    # Y轴边界范围 [最小值, 最大值]
+    x: [-70, 70]    # X轴边界范围 [最小值, 最大值]
+    y: [-70, 70]    # Y轴边界范围 [最小值, 最大值]
     violation:
       count_time: 10.0  # 计数时间窗口（秒）
       max_violations: 2  # 最大违规次数
@@ -124,13 +124,16 @@ game_rules:
     out_of_bounds: 100    # 离开边界的伤害值
     warning_time: 5.0     # 警告时间（秒）
     invincible_time: 5.0  # 出生后的无敌时间（秒）
-    damage_cooldown: 0.5  # 受伤后的无敌时间（秒）
+    damage_cooldown: 1  # 受伤后的无敌时间（秒）
   warning:
     text_scale: 0.2      # 警告文本大小
     text_color: [1, 0, 0, 1]  # 警告文本颜色 [R, G, B, A]
   game_over:
     text_position: [0, 0]  # 游戏结束文本位置
     text_scale: 0.15      # 游戏结束文本大小
+  victory:
+    text_scale: 0.2      # 胜利文本大小
+    text_color: [0, 1, 0, 1]  # 胜利文本颜色 [R, G, B, A]
   score:
     position: [1.3, 0.9]   # 得分显示位置
     scale: 0.05           # 得分文本大小 

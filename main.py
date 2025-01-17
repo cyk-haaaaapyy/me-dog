@@ -26,6 +26,9 @@ class SandboxGame(ShowBase):
         config_path = Path(__file__).parent / "config.yaml"
         self.cfg = OmegaConf.load(config_path)
         
+        # 设置天空颜色为蓝色
+        self.setBackgroundColor(0.4, 0.6, 1.0)
+        
         # 初始化立方体状态字典（只需要一次）
         self.cube_states = {}
         
@@ -185,6 +188,14 @@ class SandboxGame(ShowBase):
         
         # 添加无敌状态光环
         self.create_invincible_halo()
+        
+        # 添加游戏局数相关属性
+        self.current_game = 1
+        self.victory_text = None
+        self.round_text = None
+        
+        # 添加局数显示
+        self.setup_round_display()
         
     def create_terrain(self):
         # 创建地面
@@ -696,6 +707,19 @@ class SandboxGame(ShowBase):
         if self.game_running:
             survival_time = int(globalClock.getRealTime() - self.start_time)
             self.score_text.setText(f'Survival Time: {survival_time}s')
+            
+            # 检查特定时间点
+            if self.current_game == 1 and survival_time >= 40:
+                self.current_game = 2
+                self.restart_game()
+                return Task.cont  # 重启后立即返回
+            elif self.current_game == 2 and survival_time >= 50:
+                self.current_game = 3
+                self.restart_game()
+                return Task.cont  # 重启后立即返回
+            elif self.current_game == 3 and survival_time >= 60:
+                self.show_victory()
+                return Task.cont  # 显示胜利后立即返回
         
         # 更新无敌状态
         current_time = globalClock.getRealTime()
@@ -968,6 +992,18 @@ class SandboxGame(ShowBase):
         if hasattr(self, 'game_over_text') and self.game_over_text:
             self.game_over_text.destroy()
             delattr(self, 'game_over_text')  # 完全移除属性
+            # 如果是游戏结束重启，重置局数
+            self.current_game = 1
+            
+        # 移除胜利文本
+        if hasattr(self, 'victory_text') and self.victory_text:
+            self.victory_text.destroy()
+            delattr(self, 'victory_text')  # 完全移除属性
+            # 如果是胜利后重启，重置局数
+            self.current_game = 1
+        
+        # 更新局数显示
+        self.round_text.setText(f'Round: {self.current_game}')
         
         # 重置玩家状态
         self.health = self.cfg.player_status.initial_health
@@ -1404,6 +1440,31 @@ class SandboxGame(ShowBase):
         else:
             # 隐藏光环
             self.invincible_halo.hide()
+
+    def setup_round_display(self):
+        # 创建局数显示文本
+        self.round_text = OnscreenText(
+            text='Round: 1',
+            pos=(-0.25, 0.75),     # 位置在无敌时间显示的下面
+            scale=0.05,
+            fg=(1, 1, 1, 1),
+            align=TextNode.ALeft,
+            mayChange=True
+        )
+
+    def show_victory(self):
+        # 停止游戏运行
+        self.game_running = False
+        
+        # 创建胜利文本
+        self.victory_text = OnscreenText(
+            text='Victory!\nPress R to restart',
+            pos=(0, 0.2),  # 在屏幕中上方
+            scale=self.cfg.game_rules.victory.text_scale,
+            fg=tuple(self.cfg.game_rules.victory.text_color),
+            align=TextNode.ACenter,
+            mayChange=True
+        )
 
 game = SandboxGame()
 game.run() 
